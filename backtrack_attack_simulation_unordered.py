@@ -351,6 +351,7 @@ class Robot:
                         sim.comm_system.broadcast_message(
                             self.robot_id, "collision", {"robot_id": self.robot_id, "at": (self.x, self.y)}
                         )
+                        print(f"[COLLISION] Fair R{self.robot_id} collided with Malicious R{other.robot_id} at {(self.x, self.y)}")
                         return True
 
         # --- Normal move ---
@@ -385,7 +386,13 @@ class Robot:
                         self.metrics = getattr(self, 'metrics', {})
                         self.metrics['reexplorations'] = self.metrics.get('reexplorations', 0) + 1
 
-                        # 🚫 Do NOT stop here. Robot will stop when malicious releases.
+                        # ✅ Record the first intersection point
+                        if not hasattr(self, "first_intersection"):
+                            self.first_intersection = (self.x-1, self.y-1)
+
+                        # ✅ Mark that later, when malicious releases, this robot must backtrack
+                        self.must_backtrack_to_intersection = False  # not yet, wait for release
+
                         return True
 
         return True
@@ -526,6 +533,19 @@ class Robot:
         """Execute one step of the ORMSTC algorithm"""
         if not self.alive:
             return False
+        
+        # --- Backtrack-to-intersection mode (triggered after malicious release) ---
+        if getattr(self, "must_backtrack_to_intersection", False):
+            # If we haven’t yet reached the stored intersection point
+            if (self.x, self.y) != getattr(self, "first_intersection", None):
+                return self.backtrack()
+            else:
+                # ✅ Reached intersection point: stop here
+                self.completed = True
+                self.checking_connections = False
+                self.returning_home = False
+                self.must_backtrack_to_intersection = False
+                return False
 
         # If completed and checking connections
         if self.completed and self.checking_connections:
@@ -692,22 +712,18 @@ class MaliciousRobot(Robot):
 
         # You can add other modes here (burst_replay, random_delay, etc.)
         if should_release:
+
+            
             released_cells = []   # ✅ track all cells being released this round
 
-
-            ##RANDOM
+            ##RAndom
             random.shuffle(self.outbox)
             print(f"\n[Malicious R{self.robot_id}] Releasing {len(self.outbox)} buffered messages in RANDOM order (step {cur_step}):")
 
-
             while self.outbox:
-
-                
                 entry = self.outbox.pop(0)
 
-                # 🖨️ Print each message as it’s released
                 print(f"   → {entry['msg_type']} | data={entry['data']} | buffered_at_step={entry['orig_step']}")
-
 
                 if entry['msg_type'] == 'move':
                     pos = entry['data']['position']
@@ -728,14 +744,15 @@ class MaliciousRobot(Robot):
                 if hasattr(self, "simulation") and self.simulation is not None:
                     self.simulation.attack_metrics['delayed_messages_total'] += 1
 
-            # ✅ After releasing, stop fair robots that unknowingly re-explored these cells
+            # ✅ After releasing, trigger backtracking for fair robots that re-explored
             if hasattr(self, "simulation") and self.simulation is not None:
                 for r in self.simulation.robots:
                     if not getattr(r, 'is_malicious', False):
                         if any(c in r.local_map.covered_cells for c in released_cells):
-                            r.completed = True
-                            r.checking_connections = False
-                            r.returning_home = False
+                            if hasattr(r, "first_intersection"):
+                                # Tell this robot to start backtracking on its next steps
+                                r.must_backtrack_to_intersection = True
+
 
             # Clear bookkeeping
             self.unreported_covered_cells.clear()
@@ -1146,10 +1163,10 @@ def main():
         print(f"Total free cells: {total_free_cells}")
         print(f"Coverage percentage: {coverage_percentage:.1f}%")
 
-        if coverage_percentage >= 99.0:
-            print("🎉 Excellent coverage achieved!")
-        elif coverage_percentage >= 95.0:
-            print("✅ Good coverage achieved!")
+        # if coverage_percentage >= 99.0:
+        #     print("🎉 Excellent coverage achieved!")
+        # elif coverage_percentage >= 95.0:
+        #     print("✅ Good coverage achieved!")
 
         print("\nRobot path lengths:")
         for i, path in enumerate(results['robot_paths']):
