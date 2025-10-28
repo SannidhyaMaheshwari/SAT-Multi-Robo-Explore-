@@ -483,7 +483,7 @@ class ORMSTCSimulation:
             patches.Patch(color='lightgray', label='Dead/Collided robot')
         )
 
-        #self.ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.02, 1))
+        self.ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.02, 1))
 
         plt.tight_layout()
         # NEW: update last-seen epoch after drawing
